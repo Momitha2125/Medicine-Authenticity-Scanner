@@ -41,3 +41,12 @@ Consumers cannot easily distinguish between genuine and fake medicines because c
 ---
 
 ## 📁 Project Structure
+Medicine-Authenticity-Scanner/
+│── backend/
+│── web/
+│── README.md
+
+---
+
+## 📌 Project Status
+Developed as part of **Innovation Ignite Symposium 2025 – Mini Hackathon**.
