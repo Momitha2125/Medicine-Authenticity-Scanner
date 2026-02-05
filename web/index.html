@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Medicine Authenticity Scanner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script defer src="https://unpkg.com/@zxing/browser@latest"></script>
+  <style>
+    :root{
+      --bg:#06081a; --ink:#f5f7ff; --muted:#a4afc5; --card:#0b1130; --border:#1b2550;
+      --brand1:#8a5bff; --brand2:#00d4ff; --brand3:#ff7ac6; --ring:#7c9cff66;
+      --ok:#16d067; --warn:#ffb020; --bad:#ff4d6d;
+      --glass:linear-gradient(180deg, #0e1238cc, #0b0f2add);
+    }
+    @media (prefers-color-scheme: light){
+      :root{ --bg:#f6f8ff; --ink:#0b1220; --muted:#4b5563; --card:#ffffff; --border:#e5e7eb; --glass:linear-gradient(180deg, #ffffffcc, #f7fafccc); }
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0; font-family:Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color:var(--ink); background:var(--bg); overflow-x:hidden}
+
+    /* --- Colorful animated background --- */
+    .bgfx{position:fixed; inset:0; z-index:-2; overflow:hidden; filter:saturate(120%)}
+    .blob{position:absolute; width:60vmax; height:60vmax; border-radius:50%; filter:blur(90px); opacity:.35; animation:float 18s ease-in-out infinite}
+    .blob.a{left:-10%; top:-10%; background:radial-gradient(closest-side, var(--brand1), transparent)}
+    .blob.b{right:-10%; top:0; background:radial-gradient(closest-side, var(--brand2), transparent); animation-duration:22s}
+    .blob.c{left:10%; bottom:-10%; background:radial-gradient(closest-side, var(--brand3), transparent); animation-duration:26s}
+    @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(24px)}}
+
+    /* --- AUTH / WELCOME --- */
+    .auth{min-height:100dvh; display:grid; place-items:center; padding:28px}
+    .panel{width:min(1100px, 96vw); background:var(--glass); border:1px solid var(--border); border-radius:28px; box-shadow:0 30px 120px #0007; backdrop-filter: blur(10px); overflow:hidden; position:relative; animation:slideCorner .6s cubic-bezier(.2,.7,.2,1) both}
+@keyframes slideCorner{from{opacity:0; transform:translate(-28px,-24px) scale(.98)} to{opacity:1; transform:none}}
+
+    .welcomeBar{position:absolute; inset:0; pointer-events:none; border-radius:28px; padding:2px; background:linear-gradient(135deg, var(--brand1), var(--brand2), var(--brand3)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;}
+
+    .panel .grid{display:grid; grid-template-columns:1.2fr .8fr}
+    @media(max-width:1000px){ .panel .grid{grid-template-columns:1fr} }
+
+    .splash{position:relative; padding:36px; background:linear-gradient(135deg, #0f1446, #0b1130); display:flex; flex-direction:column; justify-content:center; gap:18px}
+    .badge{display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; background:linear-gradient(90deg, #ffffff12, #ffffff06); border:1px solid var(--border); font-weight:700; font-size:12px}
+    .brandRow{display:flex; align-items:center; gap:12px}
+    .logo{width:58px; height:58px; display:grid; place-items:center; border-radius:16px; background:conic-gradient(from 210deg, var(--brand1), var(--brand2), var(--brand3)); box-shadow:0 10px 40px #7c9cff55}
+    .logo svg{width:28px; height:28px; stroke:#fff}
+    .splash h1{margin:0; font-weight:800; font-size:clamp(26px, 2vw + 18px, 40px); letter-spacing:.2px; animation:fadeUp .6s ease .15s both}
+@keyframes fadeUp{from{opacity:0; transform:translateY(12px)} to{opacity:1; transform:none}}
+    .splash p{margin:0; color:var(--muted); animation:fadeUp .6s ease .25s both}
+
+    /* Detection type chips */
+    .modes{display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:10px}
+.modes .mode{opacity:0; transform:translateY(14px) scale(.98)}
+.modes .mode.show{animation:popUp .45s ease forwards}
+@keyframes popUp{to{opacity:1; transform:translateY(0) scale(1)}}
+    .mode{position:relative; padding:14px; border-radius:16px; border:1px solid var(--border); background:linear-gradient(180deg, #ffffff10, #00000018); cursor:pointer; transition:transform .2s ease, box-shadow .3s ease, border-color .3s ease, background .3s ease; overflow:hidden; isolation:isolate}
+.mode::before{content:""; position:absolute; inset:-1px; border-radius:18px; padding:1px; background:linear-gradient(135deg, var(--brand1), var(--brand2)); -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask-composite: exclude; opacity:.0; transition:opacity .25s ease}
+.mode:hover{transform:translateY(-2px) scale(1.015); box-shadow:0 14px 38px #0006}
+.mode:active{transform:translateY(0) scale(.985)}
+.mode.selected{border-color:transparent; box-shadow:0 18px 50px color-mix(in oklab, var(--brand2) 30%, black); animation:pop .3s ease-out}
+.mode.selected::before{opacity:1}
+@keyframes pop{0%{transform:scale(.96)}100%{transform:scale(1)}}
+/* selection ripple */
+.mode .pulse{position:absolute; width:12px; height:12px; border-radius:999px; background:color-mix(in oklab, var(--brand2) 70%, white); opacity:.55; transform:translate(-50%,-50%) scale(1); animation:ripple .7s ease-out forwards; mix-blend:screen; z-index:-1}
+@keyframes ripple{to{opacity:0; transform:translate(-50%,-50%) scale(26)}}
+    .mode:hover{transform:translateY(-1px); box-shadow:0 12px 36px #0006}
+    .mode .ribbon{position:absolute; top:8px; right:8px; font-size:11px; padding:4px 8px; border-radius:999px; background:linear-gradient(135deg, var(--brand1), var(--brand2)); color:#fff}
+    .mode.disabled{opacity:.6; cursor:not-allowed}
+
+    .authForm{padding:36px}
+    .tabs{display:flex; gap:10px; margin-bottom:16px}
+    .tab{flex:0 0 auto; padding:10px 14px; border-radius:999px; border:1px solid var(--border); background:linear-gradient(180deg, #ffffff08, #00000018); font-weight:700; cursor:pointer}
+    .tab.active{background:linear-gradient(135deg, var(--brand1), var(--brand2)); color:white; border-color:transparent; box-shadow:0 10px 30px #6d9eff66; position:relative}
+.tab.active::after{content:""; position:absolute; inset:0; border-radius:999px; box-shadow:0 0 0 6px #ffffff10; pointer-events:none}
+
+    .input{display:flex; flex-direction:column; gap:6px; margin-bottom:10px}
+    .input label{font-size:12px; color:var(--muted)}
+    .input input{padding:12px 14px; border-radius:12px; border:1px solid var(--border); background:transparent; color:var(--ink)}
+    .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+    .btn{appearance:none; border:1px solid var(--border); color:var(--ink); background:linear-gradient(180deg, #ffffff08, #00000018); padding:12px 16px; border-radius:14px; font-weight:700; cursor:pointer; transition:.2s; box-shadow:inset 0 0 0 1px #ffffff08}
+    .btn:hover{transform:translateY(-1px); box-shadow:0 12px 36px #00000055}
+    .btn.primary{border-color:transparent; background:linear-gradient(135deg, var(--brand1), var(--brand2)); color:#fff; box-shadow:0 14px 50px #6d9eff88}
+    .btn.outline{background:transparent}
+    .hint{font-size:12px; color:var(--muted)}
+
+    /* --- APP (Scanner) --- */
+    .app{display:none}
+    .container{max-width:1080px; margin:32px auto; padding:0 20px}
+    header{display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px}
+    .sub{color:var(--muted)}
+
+    .stepper{display:flex; gap:14px; align-items:center; flex-wrap:wrap}
+    .step{display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; background:linear-gradient(180deg, #ffffff08, #00000018); border:1px solid var(--border); backdrop-filter: blur(10px)}
+    .step .dot{width:9px; height:9px; border-radius:999px; background:#64748b}
+    .step.done .dot{background:var(--ok)}
+
+    .grid{display:grid; grid-template-columns:1fr; gap:18px; margin-top:10px}
+    @media(min-width:980px){ .grid{grid-template-columns:1.1fr .9fr} }
+
+    .card{position:relative; background:var(--glass); border:1px solid var(--border); border-radius:20px; padding:18px; box-shadow:0 1px 0 #00000022, 0 40px 80px #0007; backdrop-filter: blur(10px)}
+    .card h3{margin:0 0 8px; font-size:16px}
+
+    .camWrap{position:relative; border-radius:16px; overflow:hidden; border:1px solid var(--border)}
+    video{width:100%; aspect-ratio:4/3; object-fit:cover; display:block; background:#0b1220}
+    .overlay{position:absolute; inset:0; background:repeating-linear-gradient(0deg, #ffffff10 0 1px, transparent 1px 30px), repeating-linear-gradient(90deg, #ffffff10 0 1px, transparent 1px 30px); mix-blend:overlay; pointer-events:none}
+    .camStatus{position:absolute; top:10px; left:10px; display:flex; gap:8px; align-items:center; padding:6px 10px; background:linear-gradient(180deg, #ffffff08, #00000018); border:1px solid var(--border); border-radius:10px}
+    .dot{width:10px; height:10px; border-radius:999px; background:#8892a0}
+
+    .drop{display:grid; place-items:center; width:100%; max-width:640px; aspect-ratio:4/3; border:2px dashed var(--border); border-radius:16px; color:var(--muted); background:radial-gradient(200px 120px at 50% 0%, #ffffff14, transparent);} .drop.drag{outline:3px solid var(--ring)}
+    img.preview{width:100%; max-width:640px; aspect-ratio:4/3; object-fit:cover; border-radius:16px; border:1px solid var(--border); display:none}
+
+    .status{display:flex; gap:8px; flex-wrap:wrap; margin-top:12px}
+    .badge{padding:6px 10px; border-radius:10px; background:linear-gradient(180deg, #ffffff08, #00000018); border:1px solid var(--border); font-weight:700; font-size:12px}
+    .badge.authentic{color:var(--ok)} .badge.suspicious{color:var(--warn)} .badge.likely_fake{color:var(--bad)}
+    pre.json{white-space:pre-wrap; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; border:1px dashed var(--border); border-radius:12px; padding:12px; background:#00000018; max-height:320px; overflow:auto; display:none}
+
+    .toast{position:fixed; right:20px; bottom:20px; padding:10px 14px; background:linear-gradient(180deg, #ffffff08, #00000018); border:1px solid var(--border); border-radius:12px; box-shadow:0 10px 40px #0008; backdrop-filter: blur(10px); display:none}
+    .modal{position:fixed; inset:0; display:none; place-items:center; background:#00000080}
+    .modal .panel{width:min(560px, 92vw); border-radius:20px; padding:18px; background:linear-gradient(180deg, #ffffff0d, #00000026); border:1px solid var(--border); text-align:center}
+    .big{font-size:28px; font-weight:800; margin:8px 0} .desc{color:var(--muted)}
+    .spin{width:16px; height:16px; border-radius:999px; border:3px solid #ffffff55; border-top-color:#fff; display:inline-block; animation:spin 1s linear infinite; margin-right:8px} @keyframes spin{to{transform:rotate(360deg)}}
+    canvas#confetti{position:fixed; inset:0; pointer-events:none; display:none}
+
+    /* --- Time panel + dropdowns + floating texts --- */
+    .timePanel{display:inline-flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--border); border-radius:12px; background:linear-gradient(180deg, #ffffff08, #00000018)}
+    .select{position:relative}
+    .select > button{padding:8px 12px; border:1px solid var(--border); border-radius:10px; background:transparent; color:var(--ink); cursor:pointer; transition:box-shadow .2s ease, transform .2s ease}
+.select > button:hover{transform:translateY(-1px); box-shadow:0 10px 24px #0004}
+.select > button:focus{outline:none; box-shadow:0 0 0 3px color-mix(in oklab, var(--brand2) 40%, transparent)}
+    .menu{position:absolute; top:110%; left:0; min-width:180px; background:var(--card); border:1px solid var(--border); border-radius:12px; box-shadow:0 10px 30px #00000035; padding:6px; display:none; z-index:20}
+    .menu.open{display:block}
+    .menu button{display:block; width:100%; text-align:left; padding:8px 10px; border-radius:8px; background:transparent; border:0; cursor:pointer; color:var(--ink)}
+    .menu button:hover{background:linear-gradient(180deg, #ffffff08, #00000018)}
+    .float-layer{position:fixed; inset:0; pointer-events:none; overflow:hidden; z-index:9999}
+    .float-chip{position:absolute; padding:6px 10px; border-radius:999px; background:linear-gradient(180deg,#ffffff,#f2f6ff); border:1px solid var(--border); color:#111827; font-weight:600; font-size:12px; filter:drop-shadow(0 6px 18px rgba(0,0,0,.12)); animation:rise 3.5s ease-out forwards}
+    @keyframes rise{0%{ transform:translateY(0) scale(.95); opacity:0 } 8%{ opacity:1 } 92%{ opacity:1 } 100%{ transform:translateY(-120px) scale(1.05); opacity:0 }}
+    #currentTime{font:600 14px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding:6px 10px; border-radius:10px; background:#0b1220; color:#e6edf3}
+
+    /* ===================== */
+    /*  CHAT ASSISTANT UI    */
+    /* ===================== */
+    .chatFab{position:fixed; right:20px; bottom:22px; width:56px; height:56px; border-radius:999px; border:1px solid var(--border); background:conic-gradient(from 210deg, var(--brand1), var(--brand2), var(--brand3)); color:#fff; display:grid; place-items:center; box-shadow:0 18px 50px #0008; cursor:pointer; z-index:10000}
+    .chatFab:active{transform:translateY(1px)}
+
+    .chatPanel{position:fixed; right:20px; bottom:90px; width:min(420px, 92vw); max-height:72vh; display:none; grid-template-rows:auto 1fr auto; background:var(--glass); backdrop-filter: blur(12px); border:1px solid var(--border); border-radius:18px; box-shadow:0 30px 120px #0009; overflow:hidden; z-index:10000}
+    .chatPanel.open{display:grid}
+    .chatHeader{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; background:linear-gradient(180deg, #ffffff10, #00000018); border-bottom:1px solid var(--border)}
+    .chatHeader .t{font-weight:800}
+    .chatHeader .pill{font:600 11px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding:6px 8px; border-radius:999px; background:#0b1220}
+    .chatBody{padding:12px; overflow:auto; display:flex; flex-direction:column; gap:10px}
+    .msg{max-width:85%; padding:10px 12px; border-radius:14px; border:1px solid var(--border); background:linear-gradient(180deg, #ffffff10, #00000018)}
+    .msg.user{align-self:flex-end; background:linear-gradient(180deg, #1f2937, #111827)}
+    .msg.bot{align-self:flex-start}
+    .msg .meta{font-size:11px; opacity:.7; margin-top:6px}
+    .chips{display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 2px}
+    .chip{padding:6px 10px; border-radius:999px; border:1px solid var(--border); background:linear-gradient(180deg, #ffffff08, #00000018); font-weight:600; cursor:pointer}
+    .chip:hover{transform:translateY(-1px)}
+    .chatInput{display:flex; gap:8px; padding:10px; border-top:1px solid var(--border); background:linear-gradient(180deg, #ffffff08, #00000018)}
+    .chatInput input{flex:1; padding:12px 12px; border-radius:12px; border:1px solid var(--border); background:transparent; color:var(--ink)}
+
+    .kbd{font:600 11px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0b1220; padding:2px 6px; border-radius:6px}
+  </style>
+</head>
+<body>
+  <!-- animated background blobs -->
+  <div class="bgfx"><div class="blob a"></div><div class="blob b"></div><div class="blob c"></div></div>
+
+  <!-- AUTH / WELCOME GATE -->
+  <section id="auth" class="auth" aria-label="Authentication">
+    <div class="panel">
+      <div class="welcomeBar"></div>
+      <div class="grid">
+        <aside class="splash">
+          <span class="badge">🛡️ AI-Assisted • Tamper Aware</span>
+          <div class="brandRow">
+            <div class="logo" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 10v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10" stroke="white"/><path d="M8 10V6a4 4 0 0 1 8 0v4" stroke="white"/><rect x="4" y="10" width="16" height="8" rx="2" stroke="white"/></svg>
+            </div>
+            <div>
+              <h1>Welcome to <br/>Medicine Authenticity <span style="background:linear-gradient(90deg,var(--brand2),var(--brand3)); -webkit-background-clip:text; color:transparent">Detection</span></h1>
+              <p>Choose your detection type and sign in to begin.</p>
+            </div>
+          </div>
+
+          <div class="modes" id="modeGrid">
+            <div class="mode" data-mode="qr_image">
+              <div class="ribbon">Recommended</div>
+              <h3 style="margin:6px 0">QR + Image</h3>
+              <p class="hint">Best accuracy: verifies QR payload and compares package image with reference.</p>
+            </div>
+            <div class="mode" data-mode="qr_only">
+              <div class="ribbon">Available</div>
+              <h3 style="margin:6px 0">QR Only</h3>
+              <p class="hint">Fast pre-check using only QR signature.</p>
+            </div>
+            <div class="mode" data-mode="image_only">
+              <div class="ribbon">Available</div>
+              <h3 style="margin:6px 0">Image Only</h3>
+              <p class="hint">Offline visual similarity score from package photo.</p>
+            </div>
+          </div>
+        </aside>
+
+        <main class="authForm">
+          <div class="tabs">
+            <button class="tab active" id="tabSignIn">Sign In</button>
+            <button class="tab" id="tabSignUp">Sign Up</button>
+          </div>
+
+          <!-- Sign In -->
+          <form id="formSignIn">
+            <div class="input"><label>Email</label><input id="inEmail" type="email" placeholder="you@company.com" required /></div>
+            <div class="input"><label>Password</label><input id="inPass" type="password" placeholder="••••••••" minlength="6" required /></div>
+            <div class="row" style="justify-content:space-between">
+              <button type="submit" class="btn primary">Sign In</button>
+              <button type="button" class="btn outline" id="guestBtn">Continue as Guest</button>
+            </div>
+            <p class="hint" style="margin-top:8px">Demo only: credentials are stored locally on your device.</p>
+          </form>
+
+          <!-- Sign Up -->
+          <form id="formSignUp" style="display:none">
+            <div class="input"><label>Full Name</label><input id="upName" type="text" placeholder="Your name" required /></div>
+            <div class="input"><label>Email</label><input id="upEmail" type="email" placeholder="you@company.com" required /></div>
+            <div class="input"><label>Password</label><input id="upPass" type="password" placeholder="min 6 characters" minlength="6" required /></div>
+            <div class="input"><label>Confirm Password</label><input id="upPass2" type="password" placeholder="repeat password" minlength="6" required /></div>
+            <div class="row" style="justify-content:flex-end">
+              <button type="submit" class="btn primary">Create Account</button>
+            </div>
+          </form>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <!-- APP -->
+  <section id="app" class="app">
+    <div class="container">
+      <header>
+        <div class="brandRow">
+          <div class="logo" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 10v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10" stroke="white"/><path d="M8 10V6a4 4 0 0 1 8 0v4" stroke="white"/><rect x="4" y="10" width="16" height="8" rx="2" stroke="white"/></svg>
+          </div>
+          <div>
+            <h1>Medicine Authenticity Scanner</h1>
+            <div class="sub">Scan QR • Capture package • Verify in seconds</div>
+            <div class="hint" id="modeHint">Mode: QR + Image</div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap">
+          <div class="timePanel">
+            <span>Time:</span>
+            <span id="currentTime">—</span>
+            <div class="select" id="tzSelect">
+              <button id="tzBtn">UTC</button>
+              <div class="menu" id="tzMenu" role="menu" aria-label="Timezones">
+                <button data-tz="UTC">UTC</button>
+                <button data-tz="LOCAL">Local</button>
+                <button data-tz="Asia/Kolkata">IST (Asia/Kolkata)</button>
+                <button data-tz="America/New_York">ET (New York)</button>
+                <button data-tz="Europe/London">UK (London)</button>
+              </div>
+            </div>
+            <div class="select" id="fmtSelect">
+              <button id="fmtBtn">24-hour</button>
+              <div class="menu" id="fmtMenu" role="menu" aria-label="Format">
+                <button data-fmt="24">24-hour</button>
+                <button data-fmt="12">12-hour</button>
+                <button data-fmt="ISO">ISO 8601</button>
+              </div>
+            </div>
+            <button class="btn" id="sparkle" title="Show floating text">✨</button>
+          </div>
+          <div class="stepper" id="stepper">
+            <div class="step" data-step="1"><span class="dot"></span> Scan QR</div>
+            <div class="step" data-step="2"><span class="dot"></span> Add Photo</div>
+            <div class="step" data-step="3"><span class="dot"></span> Check</div>
+          </div>
+        </div>
+      </header>
+
+      <div class="grid">
+        <section class="card">
+          <h3>Step 1 · Scan QR</h3>
+          <div class="hint" style="margin-bottom:10px">Allow camera access and point to the code on the strip/box.</div>
+          <div class="camWrap">
+            <video id="video" playsinline muted></video>
+            <div class="overlay"></div>
+            <div class="camStatus"><span class="dot" id="camDot"></span> <span id="camText">Camera idle</span></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn primary" id="toggleCam">Start Camera</button>
+            <button class="btn" id="copyQR">Copy QR</button>
+            <span class="hint">Frames: <span id="frames">0</span> • QR: <b id="qrText">—</b></span>
+          </div>
+        </section>
+
+        <section class="card" id="uploadCard">
+          <h3>Step 2 · Package Photo</h3>
+          <div class="row" style="margin-bottom:10px">
+            <label class="btn" for="file">Upload / Take Photo</label>
+            <input id="file" type="file" accept="image/*" capture="environment" hidden />
+            <button class="btn" id="clearImg">Clear</button>
+            <span class="hint">or drag & drop into the area below</span>
+          </div>
+          <div id="drop" class="drop">Drop image here</div>
+          <img id="preview" class="preview" alt="Preview" />
+
+          <div class="row" style="margin-top:12px">
+            <button class="btn primary" id="checkBtn"><span class="label">Check Authenticity</span></button>
+            <span class="hint">Keyboard: <b>S</b> start/stop, <b>C</b> check, <b>Esc</b> clear</span>
+          </div>
+
+          <div id="statusRow" class="status" style="display:none"></div>
+          <pre id="jsonOut" class="json" aria-live="polite"></pre>
+
+          <details style="margin-top:10px">
+            <summary>Developer settings</summary>
+            <div class="row" style="margin-top:8px; gap:12px">
+              <div>
+                <div class="hint">Endpoint</div>
+                <input id="endpoint" value="http://localhost:8000/check" style="padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:transparent; color:var(--ink); min-width:320px"/>
+              </div>
+              <div>
+                <div class="hint">medicine_id</div>
+                <input id="med" value="MED123" style="padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:transparent; color:var(--ink)"/>
+              </div>
+              <div>
+                <div class="hint">batch_no</div>
+                <input id="batch" value="BATCH7" style="padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:transparent; color:var(--ink)"/>
+              </div>
+            </div>
+          </details>
+        </section>
+      </div>
+    </div>
+
+    <!-- Toast + Modal + Confetti for app -->
+    <div id="toast" class="toast"></div>
+    <div id="resultModal" class="modal">
+      <div class="panel" style="backdrop-filter: blur(10px)">
+        <div id="emoji" style="font-size:44px">🔍</div>
+        <div id="resultTitle" class="big">Checking…</div>
+        <div id="resultDesc" class="desc">Please wait</div>
+        <div class="row" style="justify-content:center; margin-top:12px">
+          <button class="btn" id="closeModal">Close</button>
+        </div>
+      </div>
+    </div>
+    <canvas id="confetti"></canvas>
+  </section>
+
+  <!-- floating text layer -->
+  <div class="float-layer" id="floatLayer"></div>
+
+  <!-- CHAT WIDGET UI -->
+  <button id="chatFab" class="chatFab" title="Chat with Assistant">💬</button>
+  <section id="chatPanel" class="chatPanel" aria-label="Chat Assistant">
+    <div class="chatHeader">
+      <div style="display:flex; align-items:center; gap:8px">
+        <div class="logo" style="width:32px; height:32px; border-radius:10px">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 10v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10" stroke="white"/><path d="M8 10V6a4 4 0 0 1 8 0v4" stroke="white"/><rect x="4" y="10" width="16" height="8" rx="2" stroke="white"/></svg>
+        </div>
+        <div>
+          <div class="t">Assistant</div>
+          <div class="hint">Helps with scanning, errors, and API setup</div>
+        </div>
+      </div>
+      <div class="pill" id="chatStatus">LOCAL</div>
+    </div>
+    <div id="chatBody" class="chatBody"></div>
+    <div class="chatInput">
+      <input id="chatText" placeholder="Ask about scanning, errors, or integration…"/>
+      <button class="btn primary" id="chatSend">Send</button>
+    </div>
+  </section>
+
+  <script>
+    // ---------- Mode selection ----------
+    let selectedMode = localStorage.getItem('mas_mode') || 'qr_image';
+    const modeGrid = document.getElementById('modeGrid');
+    modeGrid.addEventListener('click', (e)=>{
+      const card = e.target.closest('.mode'); if(!card) return;
+      const mode = card.dataset.mode;
+      if(card.classList.contains('disabled')){ alert('Demo: This mode will be available in the next version.'); return; }
+      selectedMode = mode; localStorage.setItem('mas_mode', mode);
+      [...modeGrid.children].forEach(c=> c.classList.remove('selected'));
+      card.classList.add('selected');
+      const r = card.getBoundingClientRect();
+      const pulse = document.createElement('span');
+      pulse.className = 'pulse';
+      const x = (e.clientX || (r.left + r.width/2)) - r.left;
+      const y = (e.clientY || (r.top + r.height/2)) - r.top;
+      pulse.style.left = x + 'px';
+      pulse.style.top  = y + 'px';
+      card.appendChild(pulse);
+      setTimeout(()=> pulse.remove(), 700);
+      if(mode==='qr_image'){
+        document.documentElement.style.setProperty('--brand1', '#8a5bff');
+        document.documentElement.style.setProperty('--brand2', '#00d4ff');
+        document.documentElement.style.setProperty('--brand3', '#ff7ac6');
+      }else if(mode==='qr_only'){
+        document.documentElement.style.setProperty('--brand1', '#22d3ee');
+        document.documentElement.style.setProperty('--brand2', '#34d399');
+        document.documentElement.style.setProperty('--brand3', '#60a5fa');
+      }else{
+        document.documentElement.style.setProperty('--brand1', '#ff7ac6');
+        document.documentElement.style.setProperty('--brand2', '#f59e0b');
+        document.documentElement.style.setProperty('--brand3', '#8b5cf6');
+      }
+    });
+
+    // ---------- Auth Logic ----------
+    const auth = document.getElementById('auth');
+    const app = document.getElementById('app');
+
+    const tabSignIn = document.getElementById('tabSignIn');
+    const tabSignUp = document.getElementById('tabSignUp');
+    const formSignIn = document.getElementById('formSignIn');
+    const formSignUp = document.getElementById('formSignUp');
+    const guestBtn = document.getElementById('guestBtn');
+
+    function setTab(which){
+      const isUp = which === 'up';
+      tabSignIn.classList.toggle('active', !isUp);
+      tabSignUp.classList.toggle('active', isUp);
+      formSignIn.style.display = isUp ? 'none' : 'block';
+      formSignUp.style.display = isUp ? 'block' : 'none';
+    }
+    tabSignIn.addEventListener('click', ()=> setTab('in'));
+    tabSignUp.addEventListener('click', ()=> setTab('up'));
+
+    function signIn(email){ localStorage.setItem('mas_user', JSON.stringify({ email, t: Date.now(), mode:selectedMode })); enterApp(); }
+    function signUp(name,email){ localStorage.setItem('mas_user', JSON.stringify({ name, email, t: Date.now(), mode:selectedMode })); enterApp(); }
+
+    function enterApp(){ auth.style.display='none'; app.style.display='block'; applyMode(localStorage.getItem('mas_mode')||'qr_image'); }
+    (function restore(){ try{ const u = JSON.parse(localStorage.getItem('mas_user')||'null'); if(u){ enterApp(); } }catch{} })();
+
+    formSignIn.addEventListener('submit', (e)=>{ e.preventDefault(); const email=document.getElementById('inEmail').value.trim(); const pass=document.getElementById('inPass').value; if(pass.length<6) return alert('Password must be at least 6 chars'); signIn(email); });
+    formSignUp.addEventListener('submit', (e)=>{ e.preventDefault(); const name=document.getElementById('upName').value.trim(); const email=document.getElementById('upEmail').value.trim(); const p1=document.getElementById('upPass').value; const p2=document.getElementById('upPass2').value; if(p1!==p2) return alert('Passwords do not match'); if(p1.length<6) return alert('Password must be at least 6 chars'); signUp(name,email); });
+    guestBtn.addEventListener('click', ()=> { localStorage.setItem('mas_guest','1'); enterApp(); });
+
+    // ---------- App Logic (Scanner) ----------
+    const video = document.getElementById('video');
+    const toggleBtn = document.getElementById('toggleCam');
+    const camDot = document.getElementById('camDot');
+    const camText = document.getElementById('camText');
+    const framesEl = document.getElementById('frames');
+    const qrTextEl = document.getElementById('qrText');
+    const copyBtn = document.getElementById('copyQR');
+    const fileInput = document.getElementById('file');
+    const drop = document.getElementById('drop');
+    const preview = document.getElementById('preview');
+    const checkBtn = document.getElementById('checkBtn');
+    const statusRow = document.getElementById('statusRow');
+    const jsonOut = document.getElementById('jsonOut');
+
+    const endpointEl = document.getElementById('endpoint');
+    const medEl = document.getElementById('med');
+    const batchEl = document.getElementById('batch');
+
+    const toast = document.getElementById('toast');
+    const modal = document.getElementById('resultModal');
+    const closeModal = document.getElementById('closeModal');
+    const emoji = document.getElementById('emoji');
+    const resultTitle = document.getElementById('resultTitle');
+    const resultDesc = document.getElementById('resultDesc');
+    const modeHint = document.getElementById('modeHint');
+    const uploadCard = document.getElementById('uploadCard');
+
+    let reader = null; let lastQR = ''; let frames = 0; let stream = null; let imgBlob = null; let lastJson = null;
+
+    const stepper = document.getElementById('stepper');
+    const markStep = (n) => { [...stepper.querySelectorAll('.step')].forEach(el => { const s=Number(el.dataset.step); el.classList.toggle('done', s<=n); }); };
+
+    function showToast(msg){ toast.textContent = msg; toast.style.display='block'; clearTimeout(showToast._t); showToast._t = setTimeout(()=> toast.style.display='none', 1800); }
+
+    function openModal(){ modal.style.display='grid'; }
+    function closeModalFn(){ modal.style.display='none'; }
+    closeModal.addEventListener('click', closeModalFn);
+    modal.addEventListener('click', (e)=>{ if(e.target===modal) closeModalFn(); });
+
+    const confetti = document.getElementById('confetti');
+    const ctx = confetti.getContext('2d');
+    let pieces=[]; function boom(){ confetti.width=innerWidth; confetti.height=innerHeight; confetti.style.display='block'; pieces = Array.from({length:150}, ()=> ({ x:Math.random()*confetti.width, y:-20, s:6+Math.random()*9, vy:2+Math.random()*3, vx:(Math.random()-.5)*2, a:Math.random()*360 })); let t=0; const tick=()=>{ t++; ctx.clearRect(0,0,confetti.width,confetti.height); pieces.forEach(p=>{ p.y+=p.vy; p.x+=p.vx; p.a+=6; ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.a*Math.PI/180); ctx.fillRect(-p.s/2,-p.s/2,p.s,p.s); ctx.restore(); }); if(t<150) requestAnimationFrame(tick); else confetti.style.display='none'; }; tick(); }
+
+    function setCamState(on){ camDot.style.background = on ? '#34d399' : '#8892a0'; camText.textContent = on ? 'Camera running' : 'Camera idle'; toggleBtn.textContent = on ? 'Stop Camera' : 'Start Camera'; }
+    function setQRText(text){ lastQR = text; qrTextEl.textContent = text || '—'; markStep(text ? 1 : 0); }
+
+    function applyMode(mode){
+      modeHint.textContent = 'Mode: ' + (mode==='qr_image' ? 'QR + Image' : mode==='qr_only' ? 'QR Only' : 'Image Only');
+      if(mode==='qr_only' || mode==='image_only'){
+        showToast('Demo mode: this selection changes the UI emphasis. Full support coming soon.');
+      }
+      uploadCard.style.display = 'block';
+    }
+
+    async function startCamera(){
+      try{ stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment'} }, audio:false }); video.srcObject = stream; await video.play(); reader = new ZXingBrowser.BrowserMultiFormatReader(); frames = 0; framesEl.textContent = frames; setCamState(true); reader.decodeFromVideoDevice(null, video, (res)=>{ frames++; framesEl.textContent = frames; if(res){ setQRText(res.getText()); }}); }
+      catch(e){ alert('Camera error: ' + (e?.message||e)); setCamState(false); }
+    }
+    async function stopCamera(){ try{ if(reader){ reader.reset(); reader=null; } }catch{} try{ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } }catch{} setCamState(false); }
+
+    function handleFile(file){ if(!file) return; imgBlob=file; const url=URL.createObjectURL(file); preview.src=url; preview.style.display='block'; drop.style.display='none'; markStep(2); }
+    function clearImage(){ imgBlob=null; preview.src=''; preview.style.display='none'; drop.style.display='grid'; markStep(lastQR?1:0); }
+
+    async function checkNow(){
+      if(!imgBlob){ showToast('Add a package photo first.'); return; }
+      openModal(); emoji.textContent='🔍'; resultTitle.textContent='Checking…'; resultDesc.textContent='Contacting server';
+      statusRow.style.display='none'; jsonOut.style.display='none';
+      const fd = new FormData(); fd.append('qr_payload', lastQR || ''); fd.append('medicine_id', medEl.value.trim()); fd.append('batch_no', batchEl.value.trim()); fd.append('file', imgBlob, 'package.jpg');
+      const btnLabel = checkBtn.querySelector('.label'); const old = btnLabel.textContent; btnLabel.innerHTML = '<span class="spin"></span>Checking…'; checkBtn.disabled=true;
+      try{ const res = await fetch(endpointEl.value.trim(), { method:'POST', body: fd }); if(!res.ok) throw new Error('HTTP '+res.status); const json = await res.json(); lastJson = json; showBadges(json); showJSON(json); markStep(3); if(json.label==='authentic'){ emoji.textContent='✅'; resultTitle.textContent='Authentic'; resultDesc.textContent='QR + image checks passed'; boom(); } else if(json.label==='likely_fake'){ emoji.textContent='⛔'; resultTitle.textContent='Likely Fake'; resultDesc.textContent='QR failed and image is low-match'; } else { emoji.textContent='⚠️'; resultTitle.textContent='Suspicious'; resultDesc.textContent='Needs manual review'; } }
+      catch(e){ lastJson = { error:String(e) }; showJSON({ error:String(e), hint:'Check server & CORS' }); emoji.textContent='❌'; resultTitle.textContent='Error'; resultDesc.textContent=String(e); }
+      finally{ btnLabel.textContent = old; checkBtn.disabled=false; }
+    }
+
+    function showBadges(payload){ statusRow.innerHTML=''; statusRow.style.display='flex'; const add=(k,v,cls='')=>{ const s=document.createElement('span'); s.className='badge '+cls; s.textContent=`${k}: ${v}`; statusRow.appendChild(s); }; if(payload.label) add('label', payload.label, payload.label); if(typeof payload.qr_ok==='boolean') add('qr_ok', payload.qr_ok); if(payload.qr_reason) add('qr_reason', payload.qr_reason); if(payload.img_score!==undefined && payload.img_score!==null) add('img_score', payload.img_score); }
+    function showJSON(obj){ jsonOut.style.display='block'; jsonOut.textContent = JSON.stringify(obj,null,2); }
+
+    document.getElementById('clearImg').addEventListener('click', clearImage);
+    toggleBtn.addEventListener('click', () => stream ? stopCamera() : startCamera());
+    copyBtn.addEventListener('click', async ()=>{ if(!lastQR) return; try{ await navigator.clipboard.writeText(lastQR); showToast('QR copied'); }catch{} });
+    fileInput.addEventListener('change', ()=> handleFile(fileInput.files[0]));
+    ;['dragenter','dragover'].forEach(ev=> drop.addEventListener(ev, e=>{ e.preventDefault(); drop.classList.add('drag'); }));
+    ;['dragleave','drop'].forEach(ev=> drop.addEventListener(ev, e=>{ e.preventDefault(); drop.classList.remove('drag'); }));
+    drop.addEventListener('drop', e=>{ const f=e.dataTransfer.files?.[0]; if(f) handleFile(f); });
+    checkBtn.addEventListener('click', checkNow);
+
+    window.addEventListener('keydown', (e)=>{ if(e.key==='s'||e.key==='S'){ e.preventDefault(); stream?stopCamera():startCamera(); } if(e.key==='c'||e.key==='C'){ e.preventDefault(); checkNow(); } if(e.key==='Escape'){ clearImage(); } });
+    window.addEventListener('beforeunload', stopCamera);
+  </script>
+
+  <!-- Time, dropdowns, floating texts JS -->
+  <script>
+    let TZ = 'UTC';
+    let FMT = '24';
+    const elTime = document.getElementById('currentTime');
+    function fmtDate(d){
+      if(FMT==='ISO'){
+        const f = new Intl.DateTimeFormat('en-GB',{ timeZone: TZ==='LOCAL'? undefined: TZ, year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+        return f.format(d) + (TZ==='LOCAL'? '': ` (${TZ})`);
+      }
+      const opts = { timeZone: TZ==='LOCAL'? undefined: TZ, hour12: FMT==='12', year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' };
+      return new Intl.DateTimeFormat('en-US', opts).format(d) + (TZ==='LOCAL'? '': ` (${TZ})`);
+    }
+    function showTime(){ elTime.textContent = fmtDate(new Date()); }
+    showTime(); setInterval(showTime, 1000);
+
+    function setupDropdown(rootId, btnId, menuId, onPick){
+      const btn = document.getElementById(btnId); const menu = document.getElementById(menuId);
+      btn.addEventListener('click', (e)=>{ e.stopPropagation(); menu.classList.toggle('open'); });
+      menu.addEventListener('click', (e)=>{ const b=e.target.closest('button'); if(!b) return; onPick(b, btn); menu.classList.remove('open'); });
+      document.addEventListener('click', ()=> menu.classList.remove('open'));
+    }
+    setupDropdown('tzSelect','tzBtn','tzMenu', (item, btn)=>{ TZ=item.dataset.tz; btn.textContent=item.textContent; showTime(); floatText(`Timezone → ${btn.textContent}`); });
+    setupDropdown('fmtSelect','fmtBtn','fmtMenu', (item, btn)=>{ FMT=item.dataset.fmt; btn.textContent=item.textContent; showTime(); floatText(`Format → ${btn.textContent}`); });
+
+    const floatLayer = document.getElementById('floatLayer');
+    const phrases = ['Welcome 👋','Verifying…','Secure ⛓️','AI-assisted 🤖','Ready to scan 📷'];
+    function floatText(text){
+      const chip=document.createElement('div'); chip.className='float-chip'; chip.textContent=text || phrases[Math.floor(Math.random()*phrases.length)];
+      const x = 20 + Math.random()*60; const y = 80 + Math.random()*10; chip.style.left=x+'vw'; chip.style.top=y+'vh';
+      floatLayer.appendChild(chip); setTimeout(()=> chip.remove(), 3600);
+    }
+    document.getElementById('sparkle').addEventListener('click', ()=> floatText());
+    setTimeout(()=> floatText('Welcome to Medicine Authenticity Detection'), 600);
+    try{
+      const cards=[...document.querySelectorAll('#modeGrid .mode')];
+      cards.forEach((c,i)=> setTimeout(()=> c.classList.add('show'), 150 + i*140));
+      ['Choose Detection Type','Secure & Fast','AI-assisted Verification'].forEach((t,i)=> setTimeout(()=> floatText(t), 800 + i*260));
+    }catch{}
+  </script>
+
+  <!-- Chat Assistant Logic -->
+  <script>
+    // =============================
+    // Config — set your backend URL
+    // =============================
+    // If you have an LLM backend, set it once in the console:
+    //   localStorage.setItem('mas_chat_endpoint', 'http://localhost:8000/chat')
+    const CHAT_ENDPOINT = localStorage.getItem('mas_chat_endpoint') || '';
+
+    const chatFab = document.getElementById('chatFab');
+    const chatPanel = document.getElementById('chatPanel');
+    const chatBody = document.getElementById('chatBody');
+    const chatText = document.getElementById('chatText');
+    const chatSend = document.getElementById('chatSend');
+    const chatStatus = document.getElementById('chatStatus');
+
+    chatStatus.textContent = CHAT_ENDPOINT ? 'REMOTE' : 'LOCAL';
+
+    const messages = [];
+
+    function addMsg(role, html){
+      const el = document.createElement('div'); el.className = 'msg ' + (role==='user'?'user':'bot');
+      el.innerHTML = html;
+      chatBody.appendChild(el);
+      chatBody.scrollTop = chatBody.scrollHeight;
+      return el;
+    }
+
+    function escapeHTML(s){ return s.replace(/[&<>]/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]) ); }
+
+    function formatBot(text){
+      // Minimal markdown: **bold**, `code`, newlines
+      let t = escapeHTML(text)
+        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+        .replace(/`([^`]+)`/g, '<span class="kbd">$1</span>')
+        .replace(/\n/g, '<br/>');
+      return t;
+    }
+
+    function localReply(q){
+      const lc = q.toLowerCase();
+      // Context-aware answers using variables from the app scope
+      const qr = (typeof lastQR!== 'undefined' && lastQR) ? lastQR : 'not scanned yet';
+      const label = (typeof lastJson=== 'object' && lastJson && lastJson.label) ? lastJson.label : 'not checked yet';
+
+      if(lc.includes('how') && (lc.includes('scan')||lc.includes('start'))) {
+        return `Quick start:\n1) Click <b>Start Camera</b> (or press <span class="kbd">S</span>).\n2) Point to the medicine QR; we auto-detect and show it next to <b>QR:</b>.\n3) Upload a clear photo of the package.\n4) Click <b>Check Authenticity</b> (or press <span class="kbd">C</span>).`;
+      }
+      if(lc.includes('cors') || lc.includes('http 4') || lc.includes('http 5')){
+        return `Troubleshooting server errors:\n• If you see CORS, enable CORS on your API or proxy it via the same origin.\n• Check the <b>Endpoint</b> field matches your backend (e.g., http://localhost:8000/check).\n• Verify the server accepts a <span class="kbd">multipart/form-data</span> POST with fields: qr_payload, medicine_id, batch_no, file.`;
+      }
+      if(lc.includes('what data') || lc.includes('fields') || lc.includes('payload')){
+        return `The app sends:\n- <b>qr_payload</b> (string)\n- <b>medicine_id</b> (string)\n- <b>batch_no</b> (string)\n- <b>file</b> (image)\nExpected response:\n- <b>label</b> (authentic / suspicious / likely_fake)\n- <b>qr_ok</b> (true/false)\n- <b>img_score</b> (0.0–1.0)\n- <b>qr_reason</b> (string) Optional reason`;
+      }
+      if(lc.includes('improve') && (lc.includes('score')||lc.includes('accuracy'))){
+        return `Tips to improve accuracy:\n• Take photos in bright, even lighting (no glare).\n• Fill the frame with the package; keep it steady.\n• Ensure the QR is sharp and unobstructed.\n• Confirm the correct <b>medicine_id</b> and <b>batch_no</b>.`;
+      }
+      if(lc.includes('status') || lc.includes('result') || lc.includes('qr')){
+        return `Current status:\n• QR: ${escapeHTML(qr)}\n• Last check label: <b>${escapeHTML(label)}</b>`;
+      }
+      if(lc.includes('endpoint') || lc.includes('connect') || lc.includes('api')){
+        return `Connect your model/API:\n1) Run your backend with a <code>/chat</code> endpoint returning JSON: { reply: string }.\n2) In the browser console: <span class="kbd">localStorage.setItem('mas_chat_endpoint','http://localhost:8000/chat')</span>\n3) Reload. The header pill will show <b>REMOTE</b>.`;
+      }
+      // Fallback helper
+      return `Hi! I can help with scanning, errors, and integration. Try: \n• "How do I scan?"\n• "Why am I getting CORS?"\n• "What request fields are sent?"\n• "How do I connect my API?"`;
+    }
+
+    async function sendChat(){
+      const q = chatText.value.trim(); if(!q) return; chatText.value='';
+      messages.push({role:'user', content:q});
+      addMsg('user', escapeHTML(q));
+      const thinking = addMsg('bot', '…');
+
+      try{
+        let replyText = '';
+        if(CHAT_ENDPOINT){
+          const res = await fetch(CHAT_ENDPOINT, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ messages, meta:{ mode:selectedMode, lastQR, lastResult:lastJson } }) });
+          if(!res.ok) throw new Error('HTTP '+res.status);
+          const data = await res.json();
+          replyText = data.reply || 'No reply from server.';
+        } else {
+          replyText = localReply(q);
+        }
+        messages.push({role:'assistant', content:replyText});
+        thinking.innerHTML = formatBot(replyText);
+      } catch(err){
+        thinking.innerHTML = formatBot('Error: '+ String(err) + '\nHint: set <code>mas_chat_endpoint</code> in localStorage, or check CORS.');
+      }
+      chatBody.scrollTop = chatBody.scrollHeight;
+    }
+
+    chatSend.addEventListener('click', sendChat);
+    chatText.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendChat(); }});
+
+    chatFab.addEventListener('click', ()=>{
+      chatPanel.classList.toggle('open');
+      if(chatPanel.classList.contains('open') && !chatPanel._boot){
+        chatPanel._boot = true;
+        addMsg('bot', formatBot('Hello! I\'m your assistant. Ask me anything about scanning, errors, or API integration.'));
+        // Quick chips
+        const chips = document.createElement('div'); chips.className='chips';
+        [
+          ['How do I scan?', 'How do I scan?'],
+          ['Why am I getting CORS?', 'I am getting a CORS error'],
+          ['What fields are sent?', 'What request fields are sent?'],
+          ['Connect my API', 'How do I connect my API?']
+        ].forEach(([label, prompt])=>{
+          const c = document.createElement('button'); c.className='chip'; c.textContent=label; c.addEventListener('click', ()=>{ chatText.value = prompt; sendChat(); }); chips.appendChild(c);
+        });
+        chatBody.appendChild(chips);
+      }
+    });
+  </script>
+</body>
+</html>
