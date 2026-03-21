@@ -1,4 +1,4 @@
-# Medicine Authenticity Scanner
+ # Medicine Authenticity Scanner
 
 **Hackathon Project | Healthcare Technology**
 
